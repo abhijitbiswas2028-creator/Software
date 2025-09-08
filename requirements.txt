@@ -1,0 +1,25 @@
+# Python requirements (if you plan to add Python backend services)
+# This is a Next.js project, so use package.json instead
+
+# For Python AI services (optional)
+google-generativeai==0.3.0
+python-dotenv==1.0.0
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+
+# For data processing (optional)
+pandas==2.1.4
+numpy==1.25.2
+
+# For web scraping (optional)
+requests==2.31.0
+beautifulsoup4==4.12.2
+
+# For database (optional)
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+
+# For testing (optional)
+pytest==7.4.3
+pytest-asyncio==0.21.1
