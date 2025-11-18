@@ -211,7 +211,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 For support and questions:
 - Email: info@abhijitsoftware.com
 - Phone: +1 (555) 012-3456
-- Website: software-opal.vercel.app
+- Website: [https://software-opal.vercel.app/](software-opal.vercel.app)
 
 ## 🙏 Acknowledgments
 
