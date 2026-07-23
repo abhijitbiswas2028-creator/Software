@@ -1,41 +1,11 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": ".next",
   "framework": "nextjs",
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
   "installCommand": "npm install",
-  "devCommand": "npm run dev",
-  "regions": ["iad1"],
-  "functions": {
-    "app/api/**/*.ts": {
-      "maxDuration": 30
-    }
-  },
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        },
-        {
-          "key": "X-Frame-Options",
-          "value": "DENY"
-        },
-        {
-          "key": "X-XSS-Protection",
-          "value": "1; mode=block"
-        }
-      ]
-    }
-  ],
-  "redirects": [
-    {
-      "source": "/home",
-      "destination": "/",
-      "permanent": true
-    }
-  ]
+  "crons": [],
+  "env": {
+    "OPENCODE_ZEN_API_KEY": "@opencode-zen-api-key",
+    "OPENCODE_ZEN_BASE_URL": "https://opencode.ai/zen/v1"
+  }
 }
-
-
