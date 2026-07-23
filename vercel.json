@@ -3,9 +3,5 @@
   "buildCommand": "next build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
-  "crons": [],
-  "env": {
-    "OPENCODE_ZEN_API_KEY": "@opencode-zen-api-key",
-    "OPENCODE_ZEN_BASE_URL": "https://opencode.ai/zen/v1"
-  }
+  "crons": []
 }
