@@ -1,6 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
+import Image from 'next/image'
 import { 
   Users, 
   Target, 
@@ -91,7 +92,7 @@ export default function AboutPage() {
             </h1>
             <p className="text-xl md:text-2xl text-primary-100 mb-8 max-w-4xl mx-auto">
               Your trusted partner in software solutions, AI tools, and digital innovation. 
-              We're committed to providing the best resources for developers, designers, and tech enthusiasts.
+              We&apos;re committed to providing the best resources for developers, designers, and tech enthusiasts.
             </p>
           </motion.div>
         </div>
@@ -207,9 +208,11 @@ export default function AboutPage() {
                 className="text-center"
               >
                 <div className="relative mb-6">
-                  <img
+                  <Image
                     src={member.image}
                     alt={member.name}
+                    width={128}
+                    height={128}
                     className="w-32 h-32 rounded-full mx-auto object-cover"
                   />
                   <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center">
@@ -242,7 +245,7 @@ export default function AboutPage() {
           >
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Get In Touch</h2>
             <p className="text-lg text-gray-600 max-w-3xl mx-auto">
-              Have questions, suggestions, or need support? We'd love to hear from you.
+              Have questions, suggestions, or need support? We&apos;d love to hear from you.
             </p>
           </motion.div>
 

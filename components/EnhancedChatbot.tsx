@@ -3,17 +3,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-  MessageCircle, 
-  X, 
-  Send, 
-  Bot, 
-  User,
-  Loader2,
-  AlertCircle,
-  CheckCircle,
-  Sparkles
+  MessageCircle, X, Send, Bot, User,
+  Loader2, AlertCircle, CheckCircle, Sparkles
 } from 'lucide-react'
-import toast from 'react-hot-toast'
 
 interface Message {
   id: string
@@ -25,19 +17,63 @@ interface Message {
 }
 
 const quickSuggestions = [
-  "Best AI tools for content creation",
-  "Windows 11 vs Windows 10",
-  "Free software for developers",
-  "Linux distributions for beginners",
-  "Productivity tools for teams"
+  "Best AI tools for coding",
+  "Windows 11 vs Ubuntu",
+  "Find photo editing software",
+  "What antivirus do you recommend?",
+  "Compare macOS and Windows"
 ]
 
+// Clean AI response: strip markdown, asterisks, special formatting chars
+function cleanText(text: string): string {
+  return text
+    // Remove markdown bold/italic: **text** or *text* or __text__ or _text_
+    .replace(/\*{1,3}([\s\S]*?)\*{1,3}/g, '$1')
+    // Remove markdown headings: ### text
+    .replace(/^#{1,6}\s+/gm, '')
+    // Remove markdown code fences: ```code```
+    .replace(/```[\s\S]*?```/g, '')
+    // Remove inline code: `code`
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove markdown links: [text](url) → text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Remove markdown images: ![alt](url)
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    // Remove markdown blockquotes: > text
+    .replace(/^>\s+/gm, '')
+    // Remove horizontal rules: --- or *** or ___
+    .replace(/^[-*_]{3,}\s*$/gm, '')
+    // Remove strikethrough: ~~text~~
+    .replace(/~~([\s\S]*?)~~/g, '$1')
+    // Remove table formatting artifacts but keep content
+    .replace(/^[\s|:,-]+$/gm, '')
+    // Collapse multiple newlines to max 2
+    .replace(/\n{3,}/g, '\n\n')
+    // Trim each line
+    .split('\n').map(l => l.trim()).join('\n')
+    .trim()
+}
+
 export default function EnhancedChatbot() {
+  const getWelcomeMessage = () => {
+    try {
+      const stored = localStorage.getItem('user')
+      if (stored) {
+        const u = JSON.parse(stored)
+        return u.role === 'admin'
+          ? 'Admin mode active. I have full system access. Ask me to run commands, check logs, or manage the server.'
+          : 'Welcome. I am your product assistant. I can help you find software, AI tools, operating systems, and shortcuts. What are you looking for today?'
+      }
+    } catch {}
+    return 'Welcome. I am your AI assistant. I can help you find software, AI tools, operating systems, and shortcuts.'
+  }
+
   const [isOpen, setIsOpen] = useState(false)
+  const [userRole, setUserRole] = useState<'user' | 'admin' | null>(null)
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Hello! I\'m your AI assistant for Abhijit Software Industry. I can help you find the perfect software, AI tools, operating systems, and shortcuts. How can I assist you today?',
+      text: getWelcomeMessage(),
       isUser: false,
       timestamp: new Date(),
       suggestions: quickSuggestions
@@ -45,7 +81,6 @@ export default function EnhancedChatbot() {
   ])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isTyping, setIsTyping] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -67,62 +102,80 @@ export default function EnhancedChatbot() {
       timestamp: new Date()
     }
 
-    setMessages(prev => [...prev, userMessage])
+    const updatedMessages = [...messages, userMessage]
+    setMessages(updatedMessages)
     setInputValue('')
     setIsLoading(true)
-    setIsTyping(true)
 
     try {
+      const history = updatedMessages
+        .slice(-11, -1)
+        .map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
+
+      const token = localStorage.getItem('token')
+      const userData = localStorage.getItem('user')
+      const role = userData ? JSON.parse(userData).role : 'user'
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: messageToSend }),
+        headers,
+        body: JSON.stringify({
+          message: messageToSend,
+          history,
+          role,
+        }),
       })
 
       const data = await response.json()
+      const cleanResponse = cleanText(data.response || 'No response')
 
-      if (data.error && !data.response) {
-        throw new Error(data.error)
+      // Handle warning response
+      if (data.warning) {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: cleanResponse,
+          isUser: false,
+          timestamp: new Date(),
+          isError: true
+        }])
+        setIsLoading(false)
+        return
       }
 
-      // Simulate typing delay for better UX
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Handle blocked user response
+      if (data.blocked) {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          text: data.response || 'Your account has been blocked for security reasons.',
+          isUser: false,
+          timestamp: new Date(),
+          isError: true
+        }])
+        setIsLoading(false)
+        return
+      }
 
-      const botResponse: Message = {
+      setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
-        text: data.response || 'Sorry, I couldn\'t process your request.',
+        text: cleanResponse,
         isUser: false,
         timestamp: new Date(),
         isError: data.error ? true : false
-      }
-      
-      setMessages(prev => [...prev, botResponse])
-      
-      if (data.error) {
-        if (data.error === 'API quota exceeded') {
-          toast.error('Gemini API quota exceeded. Using fallback responses. Please check your API key.')
-        } else {
-          toast.error('AI service temporarily unavailable, using fallback responses')
-        }
-      }
+      }])
     } catch (error) {
-      console.error('Error sending message:', error)
-      
-      const errorResponse: Message = {
+      console.error('Error:', error)
+      setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
-        text: 'Sorry, I\'m having trouble connecting right now. Please try again later or browse our categories directly.',
+        text: 'Connection error. Please try again.',
         isUser: false,
         timestamp: new Date(),
         isError: true
-      }
-      
-      setMessages(prev => [...prev, errorResponse])
-      toast.error('Connection error. Please try again.')
+      }])
     } finally {
       setIsLoading(false)
-      setIsTyping(false)
     }
   }
 
@@ -138,16 +191,30 @@ export default function EnhancedChatbot() {
   }
 
   const clearChat = () => {
+    const welcomeMsg = userRole === 'admin'
+      ? 'Admin mode active. I have full system access. Ask me to run commands, check logs, or manage the server.'
+      : 'Welcome. I am your AI assistant. I can help you find software, AI tools, operating systems, and shortcuts.'
     setMessages([
       {
         id: '1',
-        text: 'Hello! I\'m your AI assistant for Abhijit Software Industry. I can help you find the perfect software, AI tools, operating systems, and shortcuts. How can I assist you today?',
+        text: welcomeMsg,
         isUser: false,
         timestamp: new Date(),
         suggestions: quickSuggestions
       }
     ])
   }
+
+  // Detect user role on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('user')
+      if (stored) {
+        const u = JSON.parse(stored)
+        setUserRole(u.role)
+      }
+    } catch {}
+  }, [])
 
   return (
     <>
@@ -185,17 +252,8 @@ export default function EnhancedChatbot() {
                 <div>
                   <h3 className="font-semibold text-gray-900">AI Assistant</h3>
                   <p className="text-xs text-gray-500 flex items-center">
-                    {isTyping ? (
-                      <>
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                        Typing...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="h-3 w-3 text-green-500 mr-1" />
-                        Online
-                      </>
-                    )}
+                    <CheckCircle className="h-3 w-3 text-green-500 mr-1" />
+                    Online
                   </p>
                 </div>
               </div>

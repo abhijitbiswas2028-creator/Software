@@ -1,158 +1,231 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { execSync } from 'child_process'
+import { getUserFromRequest, blockUser, incrementWarning } from '@/lib/auth'
+import { detectDangerousQuery, getWarningMessage } from '@/lib/safety'
 
-// Initialize Gemini AI client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
+const OPENCODE_ZEN_BASE_URL = process.env.OPENCODE_ZEN_BASE_URL || 'https://opencode.ai/zen/v1'
+const OPENCODE_ZEN_API_KEY = process.env.OPENCODE_ZEN_API_KEY || ''
 
-// Product database for context
-const products = {
-  'ai-tools': [
-    { name: 'ChatGPT', description: 'Advanced AI chatbot for conversations, writing, and problem-solving', category: 'Chat & Conversation' },
-    { name: 'Midjourney', description: 'AI-powered image generation from text descriptions', category: 'Image Generation' },
-    { name: 'GitHub Copilot', description: 'AI pair programmer that helps you write code faster', category: 'Code Assistant' },
-    { name: 'Claude', description: 'Anthropic\'s AI assistant for complex reasoning and analysis', category: 'Chat & Conversation' },
-    { name: 'DALL-E 3', description: 'OpenAI\'s latest image generation model with improved quality', category: 'Image Generation' },
-    { name: 'Notion AI', description: 'AI writing assistant integrated into Notion workspace', category: 'Productivity' },
-    { name: 'Runway ML', description: 'AI video editing and generation platform', category: 'Video & Media' },
-    { name: 'Jasper AI', description: 'AI content creation platform for marketing and business', category: 'Content Creation' }
-  ],
-  'software': [
-    { name: 'Microsoft Office 2021', description: 'Complete office suite with Word, Excel, PowerPoint, and Outlook', category: 'Productivity' },
-    { name: 'Adobe Photoshop 2024', description: 'Professional image editing and digital art creation software', category: 'Graphics & Design' },
-    { name: 'Visual Studio Code', description: 'Free source-code editor with built-in debugging and extensions', category: 'Development' },
-    { name: 'Notion', description: 'All-in-one workspace for notes, docs, and project management', category: 'Productivity' },
-    { name: 'Figma', description: 'Collaborative interface design tool for teams', category: 'Graphics & Design' },
-    { name: 'Blender', description: 'Free 3D creation suite for modeling, animation, and rendering', category: 'Graphics & Design' },
-    { name: 'IntelliJ IDEA', description: 'Powerful IDE for Java and other JVM languages', category: 'Development' },
-    { name: 'Docker Desktop', description: 'Containerization platform for developing and deploying applications', category: 'Development' },
-    { name: 'Postman', description: 'API development and testing platform', category: 'Development' },
-    { name: 'Norton 360', description: 'Comprehensive antivirus and internet security suite', category: 'Security' },
-    { name: 'VLC Media Player', description: 'Free multimedia player that plays most video and audio formats', category: 'Media & Entertainment' },
-    { name: 'Spotify', description: 'Music streaming service with millions of songs and podcasts', category: 'Media & Entertainment' },
-    { name: 'OBS Studio', description: 'Free and open source software for video recording and live streaming', category: 'Media & Entertainment' },
-    { name: 'Steam', description: 'Digital distribution platform for video games', category: 'Gaming' },
-    { name: 'Discord', description: 'Voice, video, and text communication platform for gamers', category: 'Gaming' }
-  ],
-  'operating-systems': [
-    { name: 'Windows 11 Pro', description: 'Latest Windows OS with enhanced security, productivity features, and modern design', category: 'Windows' },
-    { name: 'Windows 10 Pro', description: 'Reliable Windows OS with enterprise features and broad compatibility', category: 'Windows' },
-    { name: 'Ubuntu 22.04 LTS', description: 'Popular Linux distribution with long-term support and user-friendly interface', category: 'Linux' },
-    { name: 'Fedora 39', description: 'Cutting-edge Linux distribution with latest features and technologies', category: 'Linux' },
-    { name: 'Debian 12', description: 'Stable and reliable Linux distribution with extensive package repository', category: 'Linux' },
-    { name: 'Kali Linux 2023.4', description: 'Penetration testing and security auditing Linux distribution', category: 'Linux' },
-    { name: 'macOS Sonoma 14', description: 'Latest macOS with enhanced productivity features and improved performance', category: 'macOS' },
-    { name: 'macOS Ventura 13', description: 'Previous generation macOS with proven stability and features', category: 'macOS' }
-  ],
-  'shortcuts': [
-    { name: 'GitHub', description: 'Code hosting platform for version control and collaboration', category: 'Developer Tools' },
-    { name: 'Stack Overflow', description: 'Q&A platform for programmers and developers', category: 'Developer Tools' },
-    { name: 'MDN Web Docs', description: 'Comprehensive documentation for web technologies', category: 'Developer Tools' },
-    { name: 'Dribbble', description: 'Design community and inspiration platform', category: 'Design Resources' },
-    { name: 'Behance', description: 'Creative portfolio platform for designers and artists', category: 'Design Resources' },
-    { name: 'Unsplash', description: 'High-quality free stock photos and images', category: 'Design Resources' },
-    { name: 'Trello', description: 'Visual project management and collaboration tool', category: 'Productivity Tools' },
-    { name: 'Slack', description: 'Team communication and collaboration platform', category: 'Productivity Tools' },
-    { name: 'Coursera', description: 'Online learning platform with courses from top universities', category: 'Learning Resources' },
-    { name: 'freeCodeCamp', description: 'Free coding bootcamp and learning platform', category: 'Learning Resources' }
-  ]
+const productCatalog = `AI Tools: ChatGPT (chat/writing), Midjourney (image gen), GitHub Copilot (coding), Claude (reasoning), DALL-E 3 (image gen), Notion AI (writing), Runway ML (video), Jasper AI (content)
+Software: VS Code (editor), Photoshop 2024 (image editing), Office 2021 (office suite), Figma (design), Blender (3D), Docker Desktop (containers), IntelliJ IDEA (Java IDE), Postman (API), Norton 360 (security), VLC (media), Spotify (music), OBS Studio (stream), Steam (gaming), Discord (chat)
+OS: Windows 11 Pro, Windows 10 Pro, Ubuntu 22.04 LTS, Fedora 39, Debian 12, Kali Linux, macOS Sonoma 14, macOS Ventura 13
+Shortcuts: GitHub, Stack Overflow, MDN Web Docs, Dribbble, Behance, Unsplash, Trello, Slack, Coursera, freeCodeCamp`
+
+// Strip markdown special characters for clean inline text display
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*{1,3}([\s\S]*?)\*{1,3}/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/^>\s+/gm, '')
+    .replace(/^[-*_]{3,}\s*$/gm, '')
+    .replace(/~~([\s\S]*?)~~/g, '$1')
+    .replace(/^[\s|:,-]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .split('\n').map(l => l.trim()).join('\n')
+    .trim()
+}
+
+async function executeCommand(command: string): Promise<string> {
+  try {
+    const stdout = execSync(command, {
+      timeout: 15000, encoding: 'utf-8', maxBuffer: 1024 * 1024, windowsHide: true,
+    })
+    return stdout.trim() || '(no output)'
+  } catch (error: any) {
+    return `Exit ${error.status || 1}: ${error.stderr?.toString().trim() || error.stdout?.toString().trim() || error.message}`
+  }
+}
+
+async function processExecBlocks(text: string): Promise<string> {
+  const regex = /\[EXEC\]([\s\S]*?)\[\/EXEC\]/g
+  let result = text
+  const matches: { full: string; command: string }[] = []
+  let m: RegExpExecArray | null
+  while ((m = regex.exec(text)) !== null) {
+    matches.push({ full: m[0], command: m[1].trim() })
+  }
+  await Promise.all(
+    matches.map(async ({ full, command }) => {
+      if (!command) return
+      const out = await executeCommand(command)
+      result = result.replace(full, `🖥️ \`${command}\`\n\`\`\`\n${out.slice(0, 2000)}\n\`\`\``)
+    })
+  )
+  return result
 }
 
 export async function POST(request: NextRequest) {
-  let message: string = ''
+  let message = ''
 
   try {
     const body = await request.json()
-    message = body.message
+    message = body.message || ''
+    const history = body.history || []
+
+    // Determine role from auth header
+    const authUser = getUserFromRequest(request)
+    const role = body.role || authUser?.role || 'user'
 
     if (!message) {
-      return NextResponse.json(
-        { error: 'Message is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Message is required' }, { status: 400 })
     }
 
-    // Check if Gemini API key is configured
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json(
-        { 
-          error: 'Gemini API key not configured',
-          fallback: 'I can help you find software, AI tools, operating systems, or useful shortcuts. What are you looking for today?'
+    if (!OPENCODE_ZEN_API_KEY) {
+      return NextResponse.json({
+        error: 'API key not configured',
+        response: 'AI assistant is not configured. Please contact the administrator.'
+      }, { status: 200 })
+    }
+
+    // ===== USER ROLE: Restricted mode =====
+    if (role === 'user') {
+      // Check for dangerous queries
+      const dangerCheck = detectDangerousQuery(message)
+      if (dangerCheck.isDangerous) {
+        // Progressive warning system
+        if (authUser) {
+          const { warnings, blocked, maxWarnings } = incrementWarning(authUser.id)
+          if (blocked) {
+            return NextResponse.json({
+              response: getWarningMessage(warnings, maxWarnings),
+              blocked: true,
+            }, { status: 200 })
+          }
+          return NextResponse.json({
+            response: getWarningMessage(warnings, maxWarnings),
+            warning: true,
+            warningCount: warnings,
+            maxWarnings,
+          }, { status: 200 })
+        } else {
+          // No auth user — just give warning without blocking
+          return NextResponse.json({
+            response: "⚠️ Security Violation\n\nI cannot assist with hacking, cybersecurity attacks, or malicious activities.",
+            warning: true,
+          }, { status: 200 })
+        }
+      }
+
+      // User mode: product-only AI with safety constraints
+      const userSystemPrompt = `You are a product assistant for Abhijit Software Industry. You help users find software, AI tools, operating systems, and shortcuts.
+
+PRODUCTS:
+${productCatalog}
+
+CRITICAL RULES - YOU MUST FOLLOW:
+1. ONLY help with product recommendations, descriptions, and comparisons
+2. NEVER execute commands, show logs, reveal credentials, or modify anything
+3. NEVER discuss hacking, exploits, malware, or security breaches
+4. NEVER reveal internal system details, API keys, or confidential info
+5. If asked anything dangerous, say: "I'm a product assistant and can't help with that."
+6. Keep responses under 100 words. Be concise and helpful.
+7. Only answer product-related questions. Redirect everything else to products.
+8. Use PLAIN TEXT only. NO markdown, NO asterisks, NO bullet points, NO special characters for formatting. Write natural conversational sentences only.`
+
+      const messages = [
+        { role: 'system', content: userSystemPrompt },
+        ...history,
+        { role: 'user', content: message }
+      ]
+
+      const response = await fetch(`${OPENCODE_ZEN_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENCODE_ZEN_API_KEY}`,
         },
-        { status: 500 }
-      )
+        body: JSON.stringify({
+          model: 'north-mini-code-free',
+          messages,
+          max_tokens: 300,
+          temperature: 0.3,
+        }),
+      })
+
+      if (!response.ok) throw new Error(`API returned ${response.status}`)
+      const data = await response.json()
+      let reply = data.choices?.[0]?.message?.content || "I'm a product assistant. How can I help you find software or AI tools today?"
+
+      // Post-process: strip any [EXEC] blocks that might have snuck through
+      reply = reply.replace(/\[EXEC\][\s\S]*?\[\/EXEC\]/g, "I can't run commands. Would you like product help instead?")
+
+      // Strip markdown special characters for clean text display
+      reply = stripMarkdown(reply)
+
+      return NextResponse.json({ response: reply })
     }
 
-    // Create context about available products
-    const productContext = Object.entries(products)
-      .map(([category, items]) => 
-        `${category}: ${items.map(item => `${item.name} (${item.description})`).join(', ')}`
-      )
-      .join('\n')
+    // ===== ADMIN ROLE: Full access =====
+    const adminPrompt = `You are the admin AI for Abhijit Software Industry. You have FULL SYSTEM ACCESS.
 
-    const systemPrompt = `You are a helpful AI assistant for Abhijit Software Industry, a platform that provides software downloads, AI tools, operating systems, and useful shortcuts. 
+PRODUCTS:
+${productCatalog}
 
-Available products:
-${productContext}
+CAPABILITIES:
+- Run shell commands: wrap in [EXEC]command[/EXEC] - they auto-execute
+- Check logs, disk, processes, memory
+- Make website changes
+- View user data
+- No approval prompts needed - just do it
 
-Your role:
-1. Help users find the right software, AI tools, operating systems, or shortcuts based on their needs
-2. Provide specific product recommendations with brief explanations
-3. Suggest alternatives when appropriate
-4. Be friendly, helpful, and concise
-5. If asked about something not in our catalog, politely redirect to what we do offer
-6. Always mention the category and provide a brief description of recommended products
+RULES:
+1. Be concise but informative
+2. Execute commands immediately when asked
+3. Provide technical details when relevant
+4. You have root-level access to the server
+5. Use PLAIN TEXT only. NO markdown, NO asterisks, NO special formatting characters. Write natural text.`
 
-Keep responses under 200 words and be conversational.`
+    const messages = [
+      { role: 'system', content: adminPrompt },
+      ...history,
+      { role: 'user', content: message }
+    ]
 
-    // Get the Gemini model
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+    const response = await fetch(`${OPENCODE_ZEN_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENCODE_ZEN_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'nemotron-3-ultra-free',
+        messages,
+        max_tokens: 2048,
+        temperature: 0.5,
+      }),
+    })
 
-    // Create the prompt for Gemini
-    const prompt = `${systemPrompt}\n\nUser: ${message}`
+    if (!response.ok) throw new Error(`API returned ${response.status}`)
+    const data = await response.json()
+    let reply = data.choices?.[0]?.message?.content || ''
 
-    const result = await model.generateContent(prompt)
-    const response = result.response.text() || 'Sorry, I couldn\'t process your request.'
+    // Process any admin exec blocks
+    if (reply.includes('[EXEC]')) {
+      reply = await processExecBlocks(reply)
+    }
 
-    return NextResponse.json({ response })
+    // Strip markdown special characters for clean text display
+    reply = stripMarkdown(reply)
+
+    return NextResponse.json({ response: reply })
 
   } catch (error: any) {
-    console.error('Gemini API error:', error)
-    
-    // Check if it's a quota exceeded error
-    const isQuotaExceeded = error?.status === 429 || error?.code === 'insufficient_quota'
-    
-    // Fallback responses based on keywords
-    const fallbackResponses = {
-      'software': 'I can help you find software! We have productivity tools, graphics software, development tools, and security software. What specific type of software are you looking for?',
-      'ai tools': 'We have a great collection of AI tools! Some popular ones include ChatGPT alternatives, image generators, code assistants, and productivity AI tools. Would you like me to show you some specific categories?',
-      'operating system': 'We offer Windows 11, Windows 10, Windows 7, various Linux distributions (Ubuntu, Fedora, Debian, Kali), and Mac OS versions. Which operating system are you interested in?',
-      'download': 'I can help you find download links! Just tell me what software, AI tool, or operating system you\'re looking for, and I\'ll provide you with the download information.',
-      'help': 'I\'m here to help you find software, AI tools, operating systems, and useful shortcuts. You can ask me about specific products, categories, or just browse our collections. What would you like to know?',
-      'default': 'I\'m here to help you find the perfect software solutions! You can ask me about software downloads, AI tools, operating systems, or useful shortcuts. What are you looking for today?'
+    console.error('AI API error:', error)
+
+    const fallbacks: Record<string, string> = {
+      'software': 'Looking for software? We have productivity, graphics, development, and security tools.',
+      'ai tools': "We've got ChatGPT, Claude, GitHub Copilot, Midjourney and more AI tools.",
+    }
+    let fb = "I'm here to help. What are you looking for?"
+    const msg = (typeof message === 'string' ? message : '').toLowerCase()
+    for (const [k, v] of Object.entries(fallbacks)) {
+      if (msg.includes(k)) { fb = v; break }
     }
 
-    const lowerMessage = message.toLowerCase()
-    let fallbackResponse = fallbackResponses.default
-
-    for (const [keyword, response] of Object.entries(fallbackResponses)) {
-      if (lowerMessage.includes(keyword)) {
-        fallbackResponse = response
-        break
-      }
-    }
-
-    // Add specific message for quota exceeded
-    if (isQuotaExceeded) {
-      fallbackResponse = `I'm currently using fallback responses due to API quota limits. ${fallbackResponse} For the full AI experience, please check your Gemini API key.`
-    }
-
-    return NextResponse.json(
-      { 
-        error: isQuotaExceeded ? 'API quota exceeded' : 'AI service temporarily unavailable',
-        response: fallbackResponse,
-        fallback: true
-      },
-      { status: 200 }
-    )
+    return NextResponse.json({ error: 'AI service temporarily unavailable', response: fb, fallback: true }, { status: 200 })
   }
 }
